@@ -22,64 +22,36 @@ func WriteSkill(outDir, name string, doc *openapi.Document) (string, error) {
 func renderSkill(name string, doc *openapi.Document, commands []Command, hasBearer bool) string {
 	title := titleFromDoc(doc, name)
 	description := descriptionFromDoc(doc, title)
-	var builder strings.Builder
-	writeFrontmatter(&builder, name, description)
-	writeSkillHeader(&builder, name, title)
-	writeCommandTable(&builder, commands)
+	parts := []string{
+		skillFrontmatter(name, description),
+		skillHeader(name, title),
+		commandList(name, commands),
+	}
 	if hasBearer {
-		writeBearerAuthNote(&builder, envVarPrefix(name))
+		parts = append(parts, fmt.Sprintf("Set `%s_TOKEN` for bearer auth.", envVarPrefix(name)))
 	}
-	lineWriter(&builder)("")
-	return builder.String()
+	return strings.Join(parts, "\n") + "\n"
 }
 
-func writeFrontmatter(builder *strings.Builder, name, description string) {
-	writeLine := lineWriter(builder)
-	writeLine("---")
-	writeLine(fmt.Sprintf("name: %s", name))
-	writeLine(fmt.Sprintf("description: '%s'", description))
-	writeLine("---")
-	writeLine("")
+func skillFrontmatter(name, description string) string {
+	return fmt.Sprintf("---\nname: %s\ndescription: '%s'\n---", name, description)
 }
 
-func writeSkillHeader(builder *strings.Builder, name, title string) {
-	writeLine := lineWriter(builder)
-	writeLine(fmt.Sprintf("# %s", title))
-	writeLine("")
-	writeLine(fmt.Sprintf("CLI: [./scripts/%s](./scripts/%s)", name, name))
-	writeLine("")
+func skillHeader(name, title string) string {
+	return fmt.Sprintf("# %s\n\nCLI: [./scripts/%s](./scripts/%s)", title, name, name)
 }
 
-func writeCommandTable(builder *strings.Builder, commands []Command) {
-	writeLine := lineWriter(builder)
-	writeLine("| Command | Flags |")
-	writeLine("| --- | --- |")
-	for _, command := range commands {
-		commandCell := fmt.Sprintf("`%s %s`", command.Group, command.Sub)
-		writeLine(fmt.Sprintf("| %s | %s |", commandCell, commandFlagsCell(command)))
+func commandList(name string, commands []Command) string {
+	lines := []string{
+		fmt.Sprintf("Use `--help` at any level to discover more: `%s --help`, `%s <group> --help`, `%s <group> <sub> --help`", name, name, name),
+		"",
+		"## Commands",
+		"",
 	}
-}
-
-func writeBearerAuthNote(builder *strings.Builder, envPrefix string) {
-	writeLine := lineWriter(builder)
-	writeLine("")
-	writeLine(fmt.Sprintf("Set `%s_TOKEN` for bearer auth.", envPrefix))
-}
-
-func commandFlagsCell(command Command) string {
-	var flagTokens []string
-	for _, param := range append(append(command.PathParams, command.QueryParams...), command.BodyParams...) {
-		flagTokens = append(flagTokens, fmt.Sprintf("`%s`", param.Flag))
+	for _, cmd := range commands {
+		lines = append(lines, fmt.Sprintf("- `%s %s`", cmd.Group, cmd.Sub))
 	}
-	flagsCell := strings.Join(flagTokens, " ")
-	if command.SchemaName == "" {
-		return flagsCell
-	}
-	schemaLink := fmt.Sprintf("[schema](./schema/%s.json)", command.SchemaName)
-	if flagsCell != "" {
-		return flagsCell + " · " + schemaLink
-	}
-	return schemaLink
+	return strings.Join(lines, "\n")
 }
 
 func titleFromDoc(doc *openapi.Document, fallback string) string {

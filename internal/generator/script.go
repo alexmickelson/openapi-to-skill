@@ -22,6 +22,26 @@ func WriteScript(outDir, name string, doc *openapi.Document, sourceURL string) (
 	return scriptPath, nil
 }
 
+// cmdGroup groups commands by their Group name, preserving order.
+type cmdGroup struct {
+	name     string
+	commands []Command
+}
+
+func groupCommands(commands []Command) []cmdGroup {
+	seen := make(map[string]int)
+	var groups []cmdGroup
+	for _, cmd := range commands {
+		if idx, ok := seen[cmd.Group]; ok {
+			groups[idx].commands = append(groups[idx].commands, cmd)
+		} else {
+			seen[cmd.Group] = len(groups)
+			groups = append(groups, cmdGroup{cmd.Group, []Command{cmd}})
+		}
+	}
+	return groups
+}
+
 // resolvedBaseAndPrefix returns the default BASE_URL (scheme+host, or servers[0].URL) and the
 // path prefix extracted from the spec URL (e.g. "/api/trpc" from "/api/trpc/openapi.json").
 // When servers[0].URL is present the prefix is empty because it is already encoded in the base URL.
@@ -51,123 +71,308 @@ func resolvedBaseAndPrefix(doc *openapi.Document, sourceURL string) (baseURL, pa
 func renderScript(name string, commands []Command, hasBearer bool, defaultBaseURL, pathPrefix string) string {
 	envPrefix := envVarPrefix(name)
 	requiresJq := anyCommandHasBodyParams(commands)
-	var builder strings.Builder
-	writeGlobalVarBlock(&builder, envPrefix, hasBearer, requiresJq, defaultBaseURL)
-	writeArgParseBlock(&builder, name)
-	writeCommandDispatcher(&builder, commands, pathPrefix)
-	return builder.String()
+	groups := groupCommands(commands)
+	return strings.Join([]string{
+		globalVarBlock(envPrefix, hasBearer, requiresJq, defaultBaseURL),
+		helpFunctions(name, groups),
+		argParseBlock(),
+		commandDispatcher(commands, groups, pathPrefix),
+	}, "\n\n")
 }
 
-func writeGlobalVarBlock(builder *strings.Builder, envPrefix string, hasBearer, requiresJq bool, defaultBaseURL string) {
-	writeLine := lineWriter(builder)
-	writeLine("#!/usr/bin/env bash")
-	writeLine("set -euo pipefail")
-	writeLine("")
-	writeLine(fmt.Sprintf(`BASE_URL="${%s_BASE_URL:-%s}"`, envPrefix, defaultBaseURL))
+func globalVarBlock(envPrefix string, hasBearer, requiresJq bool, defaultBaseURL string) string {
+	parts := []string{fmt.Sprintf(`#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${%s_BASE_URL:-%s}"
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"`, envPrefix, defaultBaseURL)}
 	if hasBearer {
-		writeLine(fmt.Sprintf(`TOKEN="${%s_TOKEN:-}"`, envPrefix))
+		parts = append(parts, fmt.Sprintf(`TOKEN="${%s_TOKEN:-}"`, envPrefix))
 	}
 	if requiresJq {
-		writeLine("")
-		writeLine(`command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }`)
+		parts = append(parts, `command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }`)
 	}
+	return strings.Join(parts, "\n")
 }
 
-func writeArgParseBlock(builder *strings.Builder, scriptName string) {
-	writeLine := lineWriter(builder)
-	writeLine("")
-	writeLine(`if [ $# -lt 2 ]; then`)
-	writeLine(fmt.Sprintf(`  echo "usage: %s <group> <subcommand> [flags]" >&2`, scriptName))
-	writeLine(`  exit 1`)
-	writeLine(`fi`)
-	writeLine("")
-	writeLine(`_group="$1"`)
-	writeLine(`_sub="$2"`)
-	writeLine(`shift 2`)
-	writeLine("")
-}
-
-func writeCommandDispatcher(builder *strings.Builder, commands []Command, pathPrefix string) {
-	writeLine := lineWriter(builder)
-	writeLine(`case "${_group} ${_sub}" in`)
-	for _, command := range commands {
-		writeCaseBlock(builder, command, pathPrefix)
+func helpFunctions(name string, groups []cmdGroup) string {
+	groupLines := make([]string, len(groups))
+	for i, g := range groups {
+		subs := make([]string, len(g.commands))
+		for j, cmd := range g.commands {
+			subs[j] = cmd.Sub
+		}
+		groupLines[i] = fmt.Sprintf(`  echo "  %-16s %s"`, g.name, strings.Join(subs, "  "))
 	}
-	writeLine(`  *)`)
-	writeLine(`    echo "unknown command: ${_group} ${_sub}" >&2`)
-	writeLine(`    exit 1`)
-	writeLine(`    ;;`)
-	writeLine(`esac`)
+
+	groupNames := make([]string, len(groups))
+	caseParts := make([]string, len(groups))
+	for i, g := range groups {
+		groupNames[i] = g.name
+		caseParts[i] = groupCaseBlock(name, g)
+	}
+
+	return fmt.Sprintf(`_show_help() {
+  echo "usage: %s <group> <subcommand> [flags]"
+  echo ""
+  echo "Groups:"
+%s
 }
 
-func writeCaseBlock(builder *strings.Builder, command Command, pathPrefix string) {
-	writeLine := lineWriter(builder)
-	writeLine(fmt.Sprintf(`  "%s %s")`, command.Group, command.Sub))
-	writeFlagParsing(builder, allParamsForCommand(command))
-	writeURLConstruction(builder, command, pathPrefix)
-	writeQueryStringAppend(builder, command.QueryParams)
-	writeBodyConstruction(builder, command.BodyParams)
-	writeCurlInvocation(builder, command)
-	writeLine(`    ;;`)
+_show_group_help() {
+  case "$1" in
+%s
+    *)
+      echo "unknown group: '$1'" >&2
+      echo "Available groups: %s" >&2
+      return 1
+      ;;
+  esac
+}`,
+		name,
+		strings.Join(groupLines, "\n"),
+		strings.Join(caseParts, "\n"),
+		strings.Join(groupNames, "  "))
 }
 
-func writeFlagParsing(builder *strings.Builder, params []Param) {
+func groupCaseBlock(scriptName string, g cmdGroup) string {
+	subLines := make([]string, 0, len(g.commands)*3)
+	for _, cmd := range g.commands {
+		flagSummary := paramFlagSummary(allParamsForCommand(cmd))
+		if flagSummary != "" {
+			subLines = append(subLines, fmt.Sprintf(`      echo "  %-12s %s"`, cmd.Sub, flagSummary))
+		} else {
+			subLines = append(subLines, fmt.Sprintf(`      echo "  %s"`, cmd.Sub))
+		}
+		if cmd.Summary != "" {
+			subLines = append(subLines, fmt.Sprintf(`      echo "               %s"`, cmd.Summary))
+		}
+		for _, p := range cmd.BodyParams {
+			if p.SchemaRef != "" {
+				subLines = append(subLines,
+					fmt.Sprintf(`      echo "               --%s schema: schema/%s.json"`, p.Name, p.SchemaRef),
+				)
+			}
+		}
+		if cmd.SchemaName != "" {
+			subLines = append(subLines,
+				fmt.Sprintf(`      echo "               request body schema: schema/%s.json"`, cmd.SchemaName),
+			)
+		}
+	}
+	return fmt.Sprintf(`    %s)
+      echo "usage: %s %s <subcommand> [flags]"
+      echo ""
+      echo "Subcommands:"
+%s
+      ;;`,
+		g.name, scriptName, g.name, strings.Join(subLines, "\n"))
+}
+
+// paramFlagSummary returns a one-line summary of flags, e.g. "--id <string>* --name <string>"
+// where * marks required params.
+func paramFlagSummary(params []Param) string {
 	if len(params) == 0 {
-		return
+		return ""
 	}
-	writeLine := lineWriter(builder)
-	for _, param := range params {
-		writeLine(fmt.Sprintf(`    %s=""`, param.BashVar))
+	parts := make([]string, len(params))
+	for i, p := range params {
+		s := fmt.Sprintf("--%s <%s>", p.Name, p.Type)
+		if p.Required {
+			s += "*"
+		}
+		parts[i] = s
 	}
-	writeLine(`    while [ $# -gt 0 ]; do`)
-	writeLine(`      case "$1" in`)
-	for _, param := range params {
-		writeLine(fmt.Sprintf(`        %s) %s="$2"; shift 2 ;;`, param.Flag, param.BashVar))
-	}
-	writeLine(`        *) echo "unknown flag: $1" >&2; exit 1 ;;`)
-	writeLine(`      esac`)
-	writeLine(`    done`)
+	return strings.Join(parts, "  ")
 }
 
-func writeURLConstruction(builder *strings.Builder, command Command, pathPrefix string) {
+func argParseBlock() string {
+	return `if [ $# -eq 0 ]; then
+  _show_help
+  exit 0
+fi
+
+_group="$1"
+shift
+
+if [ $# -eq 0 ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _show_group_help "$_group" || exit 1
+  exit 0
+fi
+
+_sub="$1"
+shift`
+}
+
+func commandDispatcher(commands []Command, groups []cmdGroup, pathPrefix string) string {
+	caseParts := make([]string, len(commands))
+	for i, cmd := range commands {
+		caseParts[i] = caseBlock(cmd, pathPrefix)
+	}
+	groupNames := make([]string, len(groups))
+	for i, g := range groups {
+		groupNames[i] = g.name
+	}
+	return fmt.Sprintf(`case "${_group} ${_sub}" in
+%s
+  *)
+    case "$_group" in
+      %s)
+        echo "unknown subcommand '$_sub' for group '$_group'" >&2
+        _show_group_help "$_group" >&2
+        ;;
+      *)
+        echo "unknown group: '$_group'" >&2
+        _show_help >&2
+        ;;
+    esac
+    exit 1
+    ;;
+esac`,
+		strings.Join(caseParts, "\n"),
+		strings.Join(groupNames, "|"))
+}
+
+func caseBlock(command Command, pathPrefix string) string {
+	parts := []string{
+		fmt.Sprintf(`  "%s %s")`, command.Group, command.Sub),
+		flagParsing(command, pathPrefix),
+		urlConstruction(command, pathPrefix),
+	}
+	if qs := queryStringAppend(command.QueryParams); qs != "" {
+		parts = append(parts, qs)
+	}
+	if body := bodyConstruction(command.BodyParams); body != "" {
+		parts = append(parts, body)
+	}
+	parts = append(parts, curlInvocation(command), "    ;;")
+	return strings.Join(parts, "\n")
+}
+
+func flagParsing(command Command, pathPrefix string) string {
+	params := allParamsForCommand(command)
+
+	initLines := make([]string, len(params))
+	for i, p := range params {
+		initLines[i] = fmt.Sprintf(`    %s=""`, p.BashVar)
+	}
+	init := ""
+	if len(initLines) > 0 {
+		init = strings.Join(initLines, "\n") + "\n"
+	}
+
+	flagCases := make([]string, len(params))
+	for i, p := range params {
+		flagCases[i] = fmt.Sprintf(`        %s) %s="$2"; shift 2 ;;`, p.Flag, p.BashVar)
+	}
+
+	var summaryLine string
+	if command.Summary != "" {
+		summaryLine = fmt.Sprintf(`          echo "%s %s - %s"`, command.Group, command.Sub, command.Summary)
+	} else {
+		summaryLine = fmt.Sprintf(`          echo "%s %s"`, command.Group, command.Sub)
+	}
+	helpLines := []string{
+		summaryLine,
+		fmt.Sprintf(`          echo "  %s %s%s"`, command.Method, pathPrefix, command.Path),
+	}
+	if len(params) > 0 {
+		helpLines = append(helpLines, `          echo ""`, `          echo "Flags:"`)
+		for _, p := range params {
+			req := ""
+			if p.Required {
+				req = "  (required)"
+			}
+			helpLines = append(helpLines, fmt.Sprintf(`          echo "  --%s <%s>%s"`, p.Name, p.Type, req))
+			if p.SchemaRef != "" {
+			helpLines = append(helpLines, fmt.Sprintf(`          echo "    schema: schema/%s.json"`, p.SchemaRef))
+			}
+		}
+	}
+	if command.SchemaName != "" {
+		helpLines = append(helpLines,
+			`          echo ""`,
+			fmt.Sprintf(`          echo "  Schema: schema/%s.json"`, command.SchemaName),
+		)
+	}
+	helpLines = append(helpLines, `          exit 0`)
+
+	var validationBlock string
+	var required []Param
+	for _, p := range params {
+		if p.Required {
+			required = append(required, p)
+		}
+	}
+	if len(required) > 0 {
+		vLines := []string{`    _missing=""`}
+		for _, p := range required {
+			vLines = append(vLines, fmt.Sprintf(`    [ -z "%s" ] && _missing="$_missing %s"`, p.BashVar, p.Flag))
+		}
+		vLines = append(vLines,
+			`    if [ -n "$_missing" ]; then`,
+			`      echo "error: missing required flags:$_missing" >&2`,
+			fmt.Sprintf(`      echo "run '$(basename "${BASH_SOURCE[0]}") %s %s --help' for usage" >&2`, command.Group, command.Sub),
+			`      exit 1`,
+			`    fi`,
+		)
+		validationBlock = "\n" + strings.Join(vLines, "\n")
+	}
+
+	return fmt.Sprintf(`%s    while [ $# -gt 0 ]; do
+      case "$1" in
+%s
+        --help|-h)
+%s
+          ;;
+        *) echo "unknown flag: $1" >&2; exit 1 ;;
+      esac
+    done%s`,
+		init,
+		strings.Join(flagCases, "\n"),
+		strings.Join(helpLines, "\n"),
+		validationBlock)
+}
+
+func urlConstruction(command Command, pathPrefix string) string {
 	urlExpression := "${BASE_URL}" + pathPrefix + command.Path
 	for _, param := range command.PathParams {
 		urlExpression = strings.ReplaceAll(urlExpression, "{"+param.Name+"}", "${"+param.BashVar+"}")
 	}
-	lineWriter(builder)(fmt.Sprintf(`    _url="%s"`, urlExpression))
+	return fmt.Sprintf(`    _url="%s"`, urlExpression)
 }
 
-func writeQueryStringAppend(builder *strings.Builder, queryParams []Param) {
+func queryStringAppend(queryParams []Param) string {
 	if len(queryParams) == 0 {
-		return
+		return ""
 	}
-	writeLine := lineWriter(builder)
-	writeLine(`    _qs=""`)
-	for _, param := range queryParams {
-		writeLine(fmt.Sprintf(`    [ -n "$%s" ] && _qs="${_qs}&%s=${%s}"`, param.BashVar, param.Name, param.BashVar))
+	lines := []string{`    _qs=""`}
+	for _, p := range queryParams {
+		lines = append(lines, fmt.Sprintf(`    [ -n "$%s" ] && _qs="${_qs}&%s=${%s}"`, p.BashVar, p.Name, p.BashVar))
 	}
-	writeLine(`    [ -n "$_qs" ] && _url="${_url}?${_qs#&}"`)
+	lines = append(lines, `    [ -n "$_qs" ] && _url="${_url}?${_qs#&}"`)
+	return strings.Join(lines, "\n")
 }
 
-func writeBodyConstruction(builder *strings.Builder, bodyParams []Param) {
+func bodyConstruction(bodyParams []Param) string {
 	if len(bodyParams) == 0 {
-		return
+		return ""
 	}
-	lineWriter(builder)(renderJqBodyStatement(bodyParams))
+	return renderJqBodyStatement(bodyParams)
 }
 
-func writeCurlInvocation(builder *strings.Builder, command Command) {
-	curlArgs := []string{fmt.Sprintf(`    curl -sf -X %s "$_url"`, command.Method)}
+func curlInvocation(command Command) string {
+	parts := []string{fmt.Sprintf(`    curl -sf -X %s "$_url"`, command.Method)}
 	if len(command.BodyParams) > 0 {
-		curlArgs = append(curlArgs, `      -H "Content-Type: application/json"`)
+		parts = append(parts, `      -H "Content-Type: application/json"`)
 	}
 	if command.HasBearer {
-		curlArgs = append(curlArgs, `      -H "Authorization: Bearer ${TOKEN}"`)
+		parts = append(parts, `      -H "Authorization: Bearer ${TOKEN}"`)
 	}
 	if len(command.BodyParams) > 0 {
-		curlArgs = append(curlArgs, `      -d "$_body"`)
+		parts = append(parts, `      -d "$_body"`)
 	}
-	lineWriter(builder)(strings.Join(curlArgs, " \\\n"))
+	return strings.Join(parts, " \\\n")
 }
 
 func renderJqBodyStatement(params []Param) string {
@@ -206,12 +411,5 @@ func anyCommandHasBodyParams(commands []Command) bool {
 
 func envVarPrefix(name string) string {
 	return strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
-}
-
-func lineWriter(builder *strings.Builder) func(string) {
-	return func(line string) {
-		builder.WriteString(line)
-		builder.WriteByte('\n')
-	}
 }
 

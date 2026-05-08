@@ -82,6 +82,14 @@ func runGenerators(outputDir, projectName, specSource string, doc *openapi.Docum
 		fatalf("schemas: %v", err)
 	}
 
+	hasBearer := generator.HasBearerAuth(doc)
+	commands := generator.ExtractCommands(doc, hasBearer)
+
+	inlineSchemaFiles, err := generator.WriteInlineSchemas(outputDir, commands)
+	if err != nil {
+		fatalf("inline schemas: %v", err)
+	}
+
 	scriptFile, err := generator.WriteScript(outputDir, projectName, doc, specSource)
 	if err != nil {
 		fatalf("script: %v", err)
@@ -92,7 +100,7 @@ func runGenerators(outputDir, projectName, specSource string, doc *openapi.Docum
 		fatalf("skill: %v", err)
 	}
 
-	return append(schemaFiles, scriptFile, skillFile)
+	return append(append(schemaFiles, inlineSchemaFiles...), scriptFile, skillFile)
 }
 
 func fatalf(format string, args ...any) {

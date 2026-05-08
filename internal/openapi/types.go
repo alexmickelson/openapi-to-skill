@@ -56,14 +56,14 @@ type MediaType struct {
 }
 
 type Schema struct {
-	Ref         string             `json:"$ref"`
-	Type        string             `json:"type"`
-	Format      string             `json:"format"`
-	Description string             `json:"description"`
-	Required    []string           `json:"required"`
-	Properties  map[string]*Schema `json:"properties"`
-	Items       *Schema            `json:"items"`
-	Enum        []any              `json:"enum"`
+	Ref         string             `json:"$ref,omitempty"`
+	Type        string             `json:"type,omitempty"`
+	Format      string             `json:"format,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Required    []string           `json:"required,omitempty"`
+	Properties  map[string]*Schema `json:"properties,omitempty"`
+	Items       *Schema            `json:"items,omitempty"`
+	Enum        []any              `json:"enum,omitempty"`
 }
 
 type Components struct {

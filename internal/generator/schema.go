@@ -24,3 +24,22 @@ func WriteSchemas(outDir string, doc *openapi.Document) ([]string, error) {
 	return writtenPaths, nil
 }
 
+func WriteInlineSchemas(outDir string, commands []Command) ([]string, error) {
+	var writtenPaths []string
+	seen := map[string]bool{}
+	for _, cmd := range commands {
+		for _, p := range cmd.BodyParams {
+			if p.SchemaJSON == "" || seen[p.SchemaRef] {
+				continue
+			}
+			seen[p.SchemaRef] = true
+			schemaPath := filepath.Join(outDir, "schema", p.SchemaRef+".json")
+			if err := os.WriteFile(schemaPath, []byte(p.SchemaJSON), 0o644); err != nil {
+				return nil, err
+			}
+			writtenPaths = append(writtenPaths, schemaPath)
+		}
+	}
+	return writtenPaths, nil
+}
+

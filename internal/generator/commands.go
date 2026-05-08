@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"unicode"
@@ -9,11 +10,13 @@ import (
 )
 
 type Param struct {
-	Name     string // spec name,  e.g. "user-id"
-	BashVar  string // bash-safe variable, e.g. "_user_id"
-	Flag     string // CLI flag, e.g. "--user-id"
-	Type     string // "string" | "integer" | "number" | "boolean"
-	Required bool
+	Name       string // spec name,  e.g. "user-id"
+	BashVar    string // bash-safe variable, e.g. "_user_id"
+	Flag       string // CLI flag, e.g. "--user-id"
+	Type       string // "string" | "integer" | "number" | "boolean"
+	Required   bool
+	SchemaRef  string // schema filename (without .json) to reference in help; set from $ref or synthesized
+	SchemaJSON string // JSON to write to schema/<SchemaRef>.json for inline object params
 }
 
 type Command struct {
@@ -21,6 +24,7 @@ type Command struct {
 	Sub         string
 	Method      string
 	Path        string
+	Summary     string // operation summary or description
 	PathParams  []Param
 	QueryParams []Param
 	BodyParams  []Param
@@ -71,11 +75,16 @@ func sortedOperations(paths map[string]openapi.PathItem) []pathOperation {
 }
 
 func operationToCommand(doc *openapi.Document, operation pathOperation, hasBearer bool) Command {
+	summary := operation.op.Summary
+	if summary == "" {
+		summary = operation.op.Description
+	}
 	command := Command{
 		Group:     commandGroup(operation.op, operation.path),
 		Sub:       commandVerb(operation.method, operation.path, operation.op),
 		Method:    strings.ToUpper(operation.method),
 		Path:      operation.path,
+		Summary:   summary,
 		HasBearer: hasBearer,
 	}
 	command.PathParams, command.QueryParams = extractURLParams(operation.op.Parameters)
@@ -113,6 +122,14 @@ func extractBodyParams(doc *openapi.Document, requestBody *openapi.RequestBody) 
 	for propertyName, propertySchema := range schema.Properties {
 		param := paramFromSpec(propertyName, propertySchema)
 		param.Required = contains(schema.Required, propertyName)
+		if propertySchema != nil && propertySchema.Ref != "" {
+			param.SchemaRef = schemaRefName(propertySchema.Ref)
+		} else if propertySchema != nil && (propertySchema.Type == "object" || len(propertySchema.Properties) > 0) {
+			if data, err := json.MarshalIndent(propertySchema, "", "  "); err == nil {
+				param.SchemaRef = propertyName
+				param.SchemaJSON = string(data)
+			}
+		}
 		params = append(params, param)
 	}
 	sort.Slice(params, func(i, j int) bool {
@@ -174,6 +191,10 @@ func commandVerb(method, path string, op *openapi.Operation) string {
 }
 
 func leadingVerbFromOperationID(operationID string) string {
+	// Strip dot-namespace prefix (e.g. "settings." from "settings.allCoursesSettings")
+	if dotIdx := strings.LastIndex(operationID, "."); dotIdx >= 0 {
+		operationID = operationID[dotIdx+1:]
+	}
 	kebabID := camelToKebab(operationID)
 	if hyphenIndex := strings.Index(kebabID, "-"); hyphenIndex > 0 {
 		return kebabID[:hyphenIndex]
