@@ -11,15 +11,14 @@ Run one-off with:
 nix run github:alexmickelson/openapi-to-skill -- <output-dir> <openapi-url>
 ```
 
-| Argument        | Description                                                                 |
-| --------------- | --------------------------------------------------------------------------- |
-| `<output-dir>`  | Directory to write the skill into (created if absent)                       |
-| `<openapi-url>` | `http`/`https`/`file` URL or local path to an OpenAPI 3.x JSON or YAML spec |
+| Argument        | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| `<output-dir>`  | Directory to write the skill into (created if absent)  |
+| `<openapi-url>` | `http`/`https` URL to an OpenAPI 3.x JSON or YAML spec |
 
 | Flag          | Description                                                             |
 | ------------- | ----------------------------------------------------------------------- |
 | `--name NAME` | Override the derived project name (default: kebab-case of `info.title`) |
-| `--force`     | Overwrite an existing skill directory                                   |
 
 ## Examples
 

@@ -11,13 +11,12 @@ import (
 )
 
 func Execute() {
-	nameOverride, force := parseFlags()
+	nameOverride := parseFlags()
 	outputDir, specSource := parsePositionalArgs()
 
 	doc := loadSpec(specSource)
 	projectName := resolveProjectName(nameOverride, doc.Info.Title)
 
-	guardOutputDir(outputDir, force)
 	createOutputDirs(outputDir)
 
 	writtenPaths := runGenerators(outputDir, projectName, specSource, doc)
@@ -26,15 +25,14 @@ func Execute() {
 	}
 }
 
-func parseFlags() (nameOverride string, force bool) {
+func parseFlags() (nameOverride string) {
 	flag.StringVar(&nameOverride, "name", "", "override the derived project name")
-	flag.BoolVar(&force, "force", false, "overwrite an existing skill directory")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: openapi-to-skill [--name NAME] [--force] <output-dir> <openapi-url>")
+		fmt.Fprintln(os.Stderr, "usage: openapi-to-skill [--name NAME] <output-dir> <openapi-url>")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	return nameOverride, force
+	return nameOverride
 }
 
 func parsePositionalArgs() (outputDir, specSource string) {
@@ -63,13 +61,6 @@ func resolveProjectName(nameOverride, titleFromSpec string) string {
 		return nameOverride
 	}
 	return generator.ProjectName(titleFromSpec)
-}
-
-func guardOutputDir(outputDir string, force bool) {
-	info, err := os.Stat(outputDir)
-	if err == nil && info.IsDir() && !force {
-		fatalf("output directory %q already exists; use --force to overwrite", outputDir)
-	}
 }
 
 func createOutputDirs(outputDir string) {

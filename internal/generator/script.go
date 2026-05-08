@@ -4,39 +4,50 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/alexmickelson/openapi-to-skill/internal/openapi"
 )
 
-func WriteScript(outDir, name string, doc *openapi.Document, defaultBaseURL string) (string, error) {
+func WriteScript(outDir, name string, doc *openapi.Document, sourceURL string) (string, error) {
 	hasBearer := HasBearerAuth(doc)
 	commands := ExtractCommands(doc, hasBearer)
+	baseURL, pathPrefix := resolvedBaseAndPrefix(doc, sourceURL)
 	scriptPath := filepath.Join(outDir, "scripts", name)
-	if err := os.WriteFile(scriptPath, []byte(renderScript(name, commands, hasBearer, resolvedBaseURL(doc, defaultBaseURL))), 0o755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(renderScript(name, commands, hasBearer, baseURL, pathPrefix)), 0o755); err != nil {
 		return "", err
 	}
 	return scriptPath, nil
 }
 
-func resolvedBaseURL(doc *openapi.Document, sourceURL string) string {
+// resolvedBaseAndPrefix returns the default BASE_URL (scheme+host, or servers[0].URL) and the
+// path prefix extracted from the spec URL (e.g. "/api/trpc" from "/api/trpc/openapi.json").
+// When servers[0].URL is present the prefix is empty because it is already encoded in the base URL.
+func resolvedBaseAndPrefix(doc *openapi.Document, sourceURL string) (baseURL, pathPrefix string) {
 	if len(doc.Servers) > 0 && doc.Servers[0].URL != "" {
-		return doc.Servers[0].URL
+		return doc.Servers[0].URL, ""
 	}
-	if parsed, err := url.Parse(sourceURL); err == nil && parsed.Host != "" {
-		return parsed.Scheme + "://" + parsed.Host
+	parsed, err := url.Parse(sourceURL)
+	if err != nil || parsed.Host == "" {
+		return sourceURL, ""
 	}
-	return sourceURL
+	base := parsed.Scheme + "://" + parsed.Host
+	prefix := strings.TrimSuffix(path.Dir(parsed.Path), "/")
+	if prefix == "." {
+		prefix = ""
+	}
+	return base, prefix
 }
 
-func renderScript(name string, commands []Command, hasBearer bool, defaultBaseURL string) string {
+func renderScript(name string, commands []Command, hasBearer bool, defaultBaseURL, pathPrefix string) string {
 	envPrefix := envVarPrefix(name)
 	requiresJq := anyCommandHasBodyParams(commands)
 	var builder strings.Builder
 	writeGlobalVarBlock(&builder, envPrefix, hasBearer, requiresJq, defaultBaseURL)
 	writeArgParseBlock(&builder, name)
-	writeCommandDispatcher(&builder, commands)
+	writeCommandDispatcher(&builder, commands, pathPrefix)
 	return builder.String()
 }
 
@@ -69,11 +80,11 @@ func writeArgParseBlock(builder *strings.Builder, scriptName string) {
 	writeLine("")
 }
 
-func writeCommandDispatcher(builder *strings.Builder, commands []Command) {
+func writeCommandDispatcher(builder *strings.Builder, commands []Command, pathPrefix string) {
 	writeLine := lineWriter(builder)
 	writeLine(`case "${_group} ${_sub}" in`)
 	for _, command := range commands {
-		writeCaseBlock(builder, command)
+		writeCaseBlock(builder, command, pathPrefix)
 	}
 	writeLine(`  *)`)
 	writeLine(`    echo "unknown command: ${_group} ${_sub}" >&2`)
@@ -82,11 +93,11 @@ func writeCommandDispatcher(builder *strings.Builder, commands []Command) {
 	writeLine(`esac`)
 }
 
-func writeCaseBlock(builder *strings.Builder, command Command) {
+func writeCaseBlock(builder *strings.Builder, command Command, pathPrefix string) {
 	writeLine := lineWriter(builder)
 	writeLine(fmt.Sprintf(`  "%s %s")`, command.Group, command.Sub))
 	writeFlagParsing(builder, allParamsForCommand(command))
-	writeURLConstruction(builder, command)
+	writeURLConstruction(builder, command, pathPrefix)
 	writeQueryStringAppend(builder, command.QueryParams)
 	writeBodyConstruction(builder, command.BodyParams)
 	writeCurlInvocation(builder, command)
@@ -111,8 +122,8 @@ func writeFlagParsing(builder *strings.Builder, params []Param) {
 	writeLine(`    done`)
 }
 
-func writeURLConstruction(builder *strings.Builder, command Command) {
-	urlExpression := "${BASE_URL}" + command.Path
+func writeURLConstruction(builder *strings.Builder, command Command, pathPrefix string) {
+	urlExpression := "${BASE_URL}" + pathPrefix + command.Path
 	for _, param := range command.PathParams {
 		urlExpression = strings.ReplaceAll(urlExpression, "{"+param.Name+"}", "${"+param.BashVar+"}")
 	}

@@ -64,15 +64,14 @@ home.activation.generateSkills = lib.hm.dag.entryAfter ["writeBoundary"] ''
 ## CLI
 
 ```
-openapi-to-skill [flags] <output-dir> <openapi-url>
+openapi-to-skill [--name NAME] <output-dir> <openapi-url>
 
 Arguments:
   output-dir    Directory to write the skill into (created if absent)
-  openapi-url   http/https/file URL or local path to an OpenAPI 3.x JSON or YAML spec
+  openapi-url   http/https URL to an OpenAPI 3.x JSON or YAML spec
 
 Flags:
   --name        Override the derived project name (default: kebab-case of info.title)
-  --force       Overwrite an existing skill directory
 ```
 
 This program will receive an output directory and an OpenAPI spec URL as arguments:
