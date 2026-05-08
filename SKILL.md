@@ -28,6 +28,11 @@ nix run github:alexmickelson/openapi-to-skill -- \
   ~/.agents/skills/my-api \
   https://my-api.example.com/openapi.json
 
+# Re-run to pick up latest flake changes (bypasses Nix's commit cache)
+nix run github:alexmickelson/openapi-to-skill --refresh -- \
+  ~/.agents/skills/my-api \
+  https://my-api.example.com/openapi.json
+
 # Override name
 nix run github:alexmickelson/openapi-to-skill -- \
   --name my-api \
