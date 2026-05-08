@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alexm/openapi-to-skill/internal/openapi"
+	"github.com/alexmickelson/openapi-to-skill/internal/openapi"
 )
 
 func WriteSkill(outDir, name string, doc *openapi.Document) (string, error) {

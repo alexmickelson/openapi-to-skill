@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alexm/openapi-to-skill/internal/generator"
-	"github.com/alexm/openapi-to-skill/internal/openapi"
+	"github.com/alexmickelson/openapi-to-skill/internal/generator"
+	"github.com/alexmickelson/openapi-to-skill/internal/openapi"
 )
 
 func Execute() {

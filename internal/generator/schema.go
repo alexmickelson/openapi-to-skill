@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alexm/openapi-to-skill/internal/openapi"
+	"github.com/alexmickelson/openapi-to-skill/internal/openapi"
 )
 
 func WriteSchemas(outDir string, doc *openapi.Document) ([]string, error) {

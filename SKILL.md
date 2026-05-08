@@ -8,7 +8,7 @@ description: "Generate an agent skill directory from an OpenAPI spec using a Nix
 Run one-off with:
 
 ```
-nix run github:alexm/openapi-to-skill -- <output-dir> <openapi-url>
+nix run github:alexmickelson/openapi-to-skill -- <output-dir> <openapi-url>
 ```
 
 | Argument        | Description                                                                 |
@@ -25,17 +25,17 @@ nix run github:alexm/openapi-to-skill -- <output-dir> <openapi-url>
 
 ```bash
 # Remote spec
-nix run github:alexm/openapi-to-skill -- \
+nix run github:alexmickelson/openapi-to-skill -- \
   ~/.agents/skills/my-api \
   https://my-api.example.com/openapi.json
 
 # Local spec
-nix run github:alexm/openapi-to-skill -- \
+nix run github:alexmickelson/openapi-to-skill -- \
   ~/.agents/skills/petstore \
   file:///home/user/specs/petstore.yaml
 
 # Override name
-nix run github:alexm/openapi-to-skill -- \
+nix run github:alexmickelson/openapi-to-skill -- \
   --name my-api \
   ~/.agents/skills/my-api \
   https://my-api.example.com/openapi.json

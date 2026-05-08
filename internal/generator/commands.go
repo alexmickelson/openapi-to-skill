@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/alexm/openapi-to-skill/internal/openapi"
+	"github.com/alexmickelson/openapi-to-skill/internal/openapi"
 )
 
 type Param struct {

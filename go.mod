@@ -1,4 +1,4 @@
-module github.com/alexm/openapi-to-skill
+module github.com/alexmickelson/openapi-to-skill
 
 go 1.22
 

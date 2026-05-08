@@ -9,7 +9,7 @@ A Go program shipped as a Nix flake. Reads an OpenAPI spec and generates a compl
 
 ```bash
 mkdir -p ~/.agents/skills/openapi-to-skill
-curl -fsSL https://raw.githubusercontent.com/alexm/openapi-to-skill/main/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/alexmickelson/openapi-to-skill/main/SKILL.md \
   -o ~/.agents/skills/openapi-to-skill/SKILL.md
 ```
 
@@ -20,14 +20,14 @@ curl -fsSL https://raw.githubusercontent.com/alexm/openapi-to-skill/main/SKILL.m
 ### One-off with `nix run`
 
 ```bash
-nix run github:alexm/openapi-to-skill -- \
+nix run github:alexmickelson/openapi-to-skill -- \
   ~/.agents/skills/my-api \
   https://my-api.example.com/openapi.json
 ```
 
 ```bash
 # Local spec file (file:// URL)
-nix run github:alexm/openapi-to-skill -- \
+nix run github:alexmickelson/openapi-to-skill -- \
   ~/.agents/skills/petstore \
   file:///home/user/specs/petstore.yaml
 ```
@@ -35,7 +35,7 @@ nix run github:alexm/openapi-to-skill -- \
 ### Install into your Nix profile
 
 ```bash
-nix profile install github:alexm/openapi-to-skill
+nix profile install github:alexmickelson/openapi-to-skill
 openapi-to-skill ~/.agents/skills/my-api https://my-api.example.com/openapi.json
 ```
 
@@ -43,7 +43,7 @@ openapi-to-skill ~/.agents/skills/my-api https://my-api.example.com/openapi.json
 
 ```nix
 # flake.nix inputs
-inputs.openapi-to-skill.url = "github:alexm/openapi-to-skill";
+inputs.openapi-to-skill.url = "github:alexmickelson/openapi-to-skill";
 
 # home.packages or environment.systemPackages
 inputs.openapi-to-skill.packages.${system}.default
