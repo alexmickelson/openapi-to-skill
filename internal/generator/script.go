@@ -70,7 +70,7 @@ func resolvedBaseAndPrefix(doc *openapi.Document, sourceURL string) (baseURL, pa
 
 func renderScript(name string, commands []Command, hasBearer bool, defaultBaseURL, pathPrefix string) string {
 	envPrefix := envVarPrefix(name)
-	requiresJq := anyCommandHasBodyParams(commands)
+	requiresJq := anyCommandNeedsJq(commands)
 	groups := groupCommands(commands)
 	return strings.Join([]string{
 		globalVarBlock(envPrefix, hasBearer, requiresJq, defaultBaseURL),
@@ -85,7 +85,14 @@ func globalVarBlock(envPrefix string, hasBearer, requiresJq bool, defaultBaseURL
 set -euo pipefail
 
 BASE_URL="${%s_BASE_URL:-%s}"
-_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"`, envPrefix, defaultBaseURL)}
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -t 2 ]; then
+  _RED=$'\033[0;31m'
+  _RESET=$'\033[0m'
+else
+  _RED=''
+  _RESET=''
+fi`, envPrefix, defaultBaseURL)}
 	if hasBearer {
 		parts = append(parts, fmt.Sprintf(`TOKEN="${%s_TOKEN:-}"`, envPrefix))
 	}
@@ -123,12 +130,13 @@ _show_group_help() {
   case "$1" in
 %s
     *)
-      echo "unknown group: '$1'" >&2
+      echo "${_RED}unknown group: '$1'${_RESET}" >&2
       echo "Available groups: %s" >&2
       return 1
       ;;
   esac
 }`,
+
 		name,
 		strings.Join(groupLines, "\n"),
 		strings.Join(caseParts, "\n"),
@@ -218,11 +226,11 @@ func commandDispatcher(commands []Command, groups []cmdGroup, pathPrefix string)
   *)
     case "$_group" in
       %s)
-        echo "unknown subcommand '$_sub' for group '$_group'" >&2
+        echo "${_RED}unknown subcommand '$_sub' for group '$_group'${_RESET}" >&2
         _show_group_help "$_group" >&2
         ;;
       *)
-        echo "unknown group: '$_group'" >&2
+        echo "${_RED}unknown group: '$_group'${_RESET}" >&2
         _show_help >&2
         ;;
     esac
@@ -311,7 +319,8 @@ func flagParsing(command Command, pathPrefix string) string {
 		}
 		vLines = append(vLines,
 			`    if [ -n "$_missing" ]; then`,
-			`      echo "error: missing required flags:$_missing" >&2`,
+			`      echo "${_RED}error: missing required flags:$_missing${_RESET}" >&2`,
+
 			fmt.Sprintf(`      echo "run '$(basename "${BASH_SOURCE[0]}") %s %s --help' for usage" >&2`, command.Group, command.Sub),
 			`      exit 1`,
 			`    fi`,
@@ -325,7 +334,7 @@ func flagParsing(command Command, pathPrefix string) string {
         --help|-h)
 %s
           ;;
-        *) echo "unknown flag: $1" >&2; exit 1 ;;
+        *) echo "${_RED}unknown flag: $1${_RESET}" >&2; exit 1 ;;
       esac
     done%s`,
 		init,
@@ -348,7 +357,7 @@ func queryStringAppend(queryParams []Param) string {
 	}
 	lines := []string{`    _qs=""`}
 	for _, p := range queryParams {
-		lines = append(lines, fmt.Sprintf(`    [ -n "$%s" ] && _qs="${_qs}&%s=${%s}"`, p.BashVar, p.Name, p.BashVar))
+		lines = append(lines, fmt.Sprintf(`    [ -n "$%s" ] && _qs="${_qs}&%s=$(jq -rn --arg v "${%s}" '$v | @json | @uri')"`, p.BashVar, p.Name, p.BashVar))
 	}
 	lines = append(lines, `    [ -n "$_qs" ] && _url="${_url}?${_qs#&}"`)
 	return strings.Join(lines, "\n")
@@ -362,7 +371,7 @@ func bodyConstruction(bodyParams []Param) string {
 }
 
 func curlInvocation(command Command) string {
-	parts := []string{fmt.Sprintf(`    curl -sf -X %s "$_url"`, command.Method)}
+	parts := []string{fmt.Sprintf(`    curl -sS --fail-with-body -X %s "$_url"`, command.Method)}
 	if len(command.BodyParams) > 0 {
 		parts = append(parts, `      -H "Content-Type: application/json"`)
 	}
@@ -372,7 +381,7 @@ func curlInvocation(command Command) string {
 	if len(command.BodyParams) > 0 {
 		parts = append(parts, `      -d "$_body"`)
 	}
-	return strings.Join(parts, " \\\n")
+	return strings.Join(parts, " \\\n") + ` || { echo "${_RED}error: request failed${_RESET}" >&2; exit 1; }`
 }
 
 func renderJqBodyStatement(params []Param) string {
@@ -398,6 +407,15 @@ func allParamsForCommand(command Command) []Param {
 	params = append(params, command.QueryParams...)
 	params = append(params, command.BodyParams...)
 	return params
+}
+
+func anyCommandNeedsJq(commands []Command) bool {
+	for _, command := range commands {
+		if len(command.BodyParams) > 0 || len(command.QueryParams) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func anyCommandHasBodyParams(commands []Command) bool {
