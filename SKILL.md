@@ -29,11 +29,6 @@ nix run github:alexmickelson/openapi-to-skill -- \
   ~/.agents/skills/my-api \
   https://my-api.example.com/openapi.json
 
-# Local spec
-nix run github:alexmickelson/openapi-to-skill -- \
-  ~/.agents/skills/petstore \
-  file:///home/user/specs/petstore.yaml
-
 # Override name
 nix run github:alexmickelson/openapi-to-skill -- \
   --name my-api \

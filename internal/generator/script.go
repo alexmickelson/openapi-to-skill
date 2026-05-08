@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,9 @@ func WriteScript(outDir, name string, doc *openapi.Document, defaultBaseURL stri
 func resolvedBaseURL(doc *openapi.Document, sourceURL string) string {
 	if len(doc.Servers) > 0 && doc.Servers[0].URL != "" {
 		return doc.Servers[0].URL
+	}
+	if parsed, err := url.Parse(sourceURL); err == nil && parsed.Host != "" {
+		return parsed.Scheme + "://" + parsed.Host
 	}
 	return sourceURL
 }
