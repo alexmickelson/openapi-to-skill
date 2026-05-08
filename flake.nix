@@ -16,8 +16,7 @@
             pname = "openapi-to-skill";
             version = "0.1.0";
             src = ./.;
-            # vendor/ directory is committed; Nix uses it directly.
-            vendorHash = null;
+            vendorHash = "sha256-g+yaVIx4jxpAQ/+WrGKxhVeliYx7nLQe/zsGpxV4Fn4=";
           };
         });
 

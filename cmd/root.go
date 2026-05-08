@@ -20,7 +20,7 @@ func Execute() {
 	guardOutputDir(outputDir, force)
 	createOutputDirs(outputDir)
 
-	writtenPaths := runGenerators(outputDir, projectName, doc)
+	writtenPaths := runGenerators(outputDir, projectName, specSource, doc)
 	for _, writtenPath := range writtenPaths {
 		fmt.Println(writtenPath)
 	}
@@ -85,13 +85,13 @@ func createOutputDirs(outputDir string) {
 	}
 }
 
-func runGenerators(outputDir, projectName string, doc *openapi.Document) []string {
+func runGenerators(outputDir, projectName, specSource string, doc *openapi.Document) []string {
 	schemaFiles, err := generator.WriteSchemas(outputDir, doc)
 	if err != nil {
 		fatalf("schemas: %v", err)
 	}
 
-	scriptFile, err := generator.WriteScript(outputDir, projectName, doc)
+	scriptFile, err := generator.WriteScript(outputDir, projectName, doc, specSource)
 	if err != nil {
 		fatalf("script: %v", err)
 	}

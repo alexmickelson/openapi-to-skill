@@ -9,32 +9,39 @@ import (
 	"github.com/alexmickelson/openapi-to-skill/internal/openapi"
 )
 
-func WriteScript(outDir, name string, doc *openapi.Document) (string, error) {
+func WriteScript(outDir, name string, doc *openapi.Document, defaultBaseURL string) (string, error) {
 	hasBearer := HasBearerAuth(doc)
 	commands := ExtractCommands(doc, hasBearer)
 	scriptPath := filepath.Join(outDir, "scripts", name)
-	if err := os.WriteFile(scriptPath, []byte(renderScript(name, commands, hasBearer)), 0o755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(renderScript(name, commands, hasBearer, resolvedBaseURL(doc, defaultBaseURL))), 0o755); err != nil {
 		return "", err
 	}
 	return scriptPath, nil
 }
 
-func renderScript(name string, commands []Command, hasBearer bool) string {
+func resolvedBaseURL(doc *openapi.Document, sourceURL string) string {
+	if len(doc.Servers) > 0 && doc.Servers[0].URL != "" {
+		return doc.Servers[0].URL
+	}
+	return sourceURL
+}
+
+func renderScript(name string, commands []Command, hasBearer bool, defaultBaseURL string) string {
 	envPrefix := envVarPrefix(name)
 	requiresJq := anyCommandHasBodyParams(commands)
 	var builder strings.Builder
-	writeGlobalVarBlock(&builder, envPrefix, hasBearer, requiresJq)
+	writeGlobalVarBlock(&builder, envPrefix, hasBearer, requiresJq, defaultBaseURL)
 	writeArgParseBlock(&builder, name)
 	writeCommandDispatcher(&builder, commands)
 	return builder.String()
 }
 
-func writeGlobalVarBlock(builder *strings.Builder, envPrefix string, hasBearer, requiresJq bool) {
+func writeGlobalVarBlock(builder *strings.Builder, envPrefix string, hasBearer, requiresJq bool, defaultBaseURL string) {
 	writeLine := lineWriter(builder)
 	writeLine("#!/usr/bin/env bash")
 	writeLine("set -euo pipefail")
 	writeLine("")
-	writeLine(fmt.Sprintf(`BASE_URL="${%s_BASE_URL:-}"`, envPrefix))
+	writeLine(fmt.Sprintf(`BASE_URL="${%s_BASE_URL:-%s}"`, envPrefix, defaultBaseURL))
 	if hasBearer {
 		writeLine(fmt.Sprintf(`TOKEN="${%s_TOKEN:-}"`, envPrefix))
 	}

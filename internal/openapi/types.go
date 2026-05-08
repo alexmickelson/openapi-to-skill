@@ -4,8 +4,14 @@ package openapi
 type Document struct {
 	OpenAPI    string              `json:"openapi"`
 	Info       Info                `json:"info"`
+	Servers    []Server            `json:"servers"`
 	Paths      map[string]PathItem `json:"paths"`
 	Components Components          `json:"components"`
+}
+
+type Server struct {
+	URL         string `json:"url"`
+	Description string `json:"description"`
 }
 
 type Info struct {
