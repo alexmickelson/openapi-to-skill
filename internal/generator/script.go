@@ -26,19 +26,26 @@ func WriteScript(outDir, name string, doc *openapi.Document, sourceURL string) (
 // path prefix extracted from the spec URL (e.g. "/api/trpc" from "/api/trpc/openapi.json").
 // When servers[0].URL is present the prefix is empty because it is already encoded in the base URL.
 func resolvedBaseAndPrefix(doc *openapi.Document, sourceURL string) (baseURL, pathPrefix string) {
-	if len(doc.Servers) > 0 && doc.Servers[0].URL != "" {
-		return doc.Servers[0].URL, ""
-	}
 	parsed, err := url.Parse(sourceURL)
 	if err != nil || parsed.Host == "" {
 		return sourceURL, ""
 	}
-	base := parsed.Scheme + "://" + parsed.Host
+	origin := parsed.Scheme + "://" + parsed.Host
+
+	if len(doc.Servers) > 0 && doc.Servers[0].URL != "" {
+		serverURL := doc.Servers[0].URL
+		// Relative server URL (e.g. "/api/trpc"): embed it as prefix, keep origin as base.
+		if !strings.HasPrefix(serverURL, "http://") && !strings.HasPrefix(serverURL, "https://") {
+			return origin, strings.TrimSuffix(serverURL, "/")
+		}
+		return serverURL, ""
+	}
+
 	prefix := strings.TrimSuffix(path.Dir(parsed.Path), "/")
 	if prefix == "." {
 		prefix = ""
 	}
-	return base, prefix
+	return origin, prefix
 }
 
 func renderScript(name string, commands []Command, hasBearer bool, defaultBaseURL, pathPrefix string) string {
